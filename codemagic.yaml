@@ -10,6 +10,13 @@ workflows:
         script: |
           flutter create --platforms=android --org com.cngmeter --project-name cng_meter .
           rm -rf test
+      - name: Use CNG Meter main.dart
+        script: |
+          if [ -f main.dart ]; then
+            mkdir -p lib
+            cp main.dart lib/main.dart
+          fi
+          head -n 8 lib/main.dart
       - name: Add Bluetooth permissions to manifest
         script: |
           python3 - <<'EOF'
