@@ -11,6 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const String kServiceUuid = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const String kCmdUuid = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
@@ -18,11 +19,6 @@ const String kDataUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
 // Calibration / rename password
 const String kPin = '9891';
-
-// CNG Radar / CNG Connect backend base URL (live rate + queue).
-// Example: 'https://your-api.onrender.com'
-// Khali = sirf OSM se pumps dikhenge (rate/queue "--").
-const String kApiBase = '';
 
 // ---------- Light theme colors ----------
 const Color kInk = Color(0xFF2B2145);
@@ -785,21 +781,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 }
 
-// ---------- Radar (OSM pumps + live rate/queue) ----------
+// ---------- CNG Radar (OpenStreetMap, no backend) ----------
 
 class Station {
+  final String id;
   final String name;
   final ll.LatLng pos;
-  final double? rate;
-  final int? queue;
-  final bool live;
+  final String? brand;
+  final String? phone;
+  final String? hours;
   double km = 0;
+  double? rate;
+  int? queue;
+  DateTime? reportedAt;
   Station({
+    required this.id,
     required this.name,
     required this.pos,
-    this.rate,
-    this.queue,
-    this.live = false,
+    this.brand,
+    this.phone,
+    this.hours,
   });
 }
 
@@ -807,6 +808,14 @@ double? _num(dynamic v) {
   if (v == null) return null;
   if (v is num) return v.toDouble();
   return double.tryParse(v.toString());
+}
+
+String _ago(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inMinutes < 1) return 'abhi';
+  if (d.inMinutes < 60) return '${d.inMinutes} min pehle';
+  if (d.inHours < 24) return '${d.inHours} ghante pehle';
+  return '${d.inDays} din pehle';
 }
 
 class RadarPage extends StatefulWidget {
@@ -817,28 +826,24 @@ class RadarPage extends StatefulWidget {
 }
 
 class _RadarPageState extends State<RadarPage> {
+  static const List<String> _mirrors = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+
   final fm.MapController _map = fm.MapController();
   ll.LatLng _me = const ll.LatLng(28.6139, 77.2090);
   bool _mapReady = false;
   bool _loading = true;
+  bool _failed = false;
   bool _located = false;
   List<Station> _stations = [];
   Station? _sel;
-  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _load(recenter: true);
-    _timer = Timer.periodic(const Duration(seconds: 60), (_) {
-      if (mounted) _load();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
   }
 
   Future<ll.LatLng?> _locate() async {
@@ -864,66 +869,49 @@ class _RadarPageState extends State<RadarPage> {
     }
   }
 
-  Future<List<Station>> _fetchLive(ll.LatLng c) async {
-    if (kApiBase.isEmpty) return [];
-    try {
-      final r = await http
-          .get(Uri.parse(
-              '$kApiBase/api/public/stations?lat=${c.latitude}&lng=${c.longitude}&radius=15'))
-          .timeout(const Duration(seconds: 12));
-      if (r.statusCode != 200) return [];
-      final d = jsonDecode(r.body);
-      final list = d is List ? d : (d is Map ? (d['stations'] ?? d['data'] ?? []) : []);
-      final out = <Station>[];
-      for (final m in list as List) {
-        if (m is! Map) continue;
-        final lat = _num(m['lat'] ?? m['latitude']);
-        final lng = _num(m['lng'] ?? m['lon'] ?? m['longitude']);
-        if (lat == null || lng == null) continue;
-        out.add(Station(
-          name: (m['name'] ?? 'CNG Pump').toString(),
-          pos: ll.LatLng(lat, lng),
-          rate: _num(m['rate'] ?? m['cngRate'] ?? m['price']),
-          queue: _num(m['queue'] ?? m['queueLength'] ?? m['waiting'])?.round(),
-          live: true,
-        ));
-      }
-      return out;
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<List<Station>> _fetchOsm(ll.LatLng c) async {
+  Future<List<Station>?> _fetchOsm(ll.LatLng c) async {
     final q =
-        '[out:json][timeout:20];nwr["amenity"="fuel"]["fuel:cng"="yes"](around:10000,${c.latitude},${c.longitude});out center 40;';
-    try {
-      final r = await http.post(
-        Uri.parse('https://overpass-api.de/api/interpreter'),
-        headers: {'User-Agent': 'CNGBuddy/1.0'},
-        body: {'data': q},
-      ).timeout(const Duration(seconds: 25));
-      if (r.statusCode != 200) return [];
-      final d = jsonDecode(r.body);
-      final out = <Station>[];
-      for (final e in (d['elements'] as List)) {
-        final tags = (e['tags'] ?? {}) as Map;
-        final lat = _num(e['lat'] ?? (e['center'] != null ? e['center']['lat'] : null));
-        final lon = _num(e['lon'] ?? (e['center'] != null ? e['center']['lon'] : null));
-        if (lat == null || lon == null) continue;
-        out.add(Station(
-          name: (tags['name'] ?? tags['brand'] ?? 'CNG Pump').toString(),
-          pos: ll.LatLng(lat, lon),
-        ));
+        '[out:json][timeout:20];nwr["amenity"="fuel"]["fuel:cng"="yes"](around:10000,${c.latitude},${c.longitude});out center 60;';
+    for (final url in _mirrors) {
+      try {
+        final r = await http.post(
+          Uri.parse(url),
+          headers: {'User-Agent': 'CNGBuddy/1.0'},
+          body: {'data': q},
+        ).timeout(const Duration(seconds: 25));
+        if (r.statusCode != 200) continue;
+        final d = jsonDecode(r.body);
+        final out = <Station>[];
+        for (final e in (d['elements'] as List)) {
+          final tags = (e['tags'] ?? {}) as Map;
+          final lat = _num(e['lat'] ?? (e['center'] != null ? e['center']['lat'] : null));
+          final lon = _num(e['lon'] ?? (e['center'] != null ? e['center']['lon'] : null));
+          if (lat == null || lon == null) continue;
+          out.add(Station(
+            id: '${e['type']}${e['id']}',
+            name: (tags['name'] ?? tags['brand'] ?? tags['operator'] ?? 'CNG Pump')
+                .toString(),
+            pos: ll.LatLng(lat, lon),
+            brand: tags['brand']?.toString(),
+            phone: (tags['phone'] ?? tags['contact:phone'])?.toString(),
+            hours: tags['opening_hours']?.toString(),
+          ));
+        }
+        return out;
+      } catch (_) {
+        continue;
       }
-      return out;
-    } catch (_) {
-      return [];
     }
+    return null;
   }
 
   Future<void> _load({bool recenter = false}) async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _failed = false;
+      });
+    }
     if (recenter || !_located) {
       final loc = await _locate();
       if (loc != null) {
@@ -932,22 +920,34 @@ class _RadarPageState extends State<RadarPage> {
         if (_mapReady) _map.move(_me, 13.5);
       }
     }
-    final live = await _fetchLive(_me);
-    final osm = await _fetchOsm(_me);
+    final list = await _fetchOsm(_me);
+    if (!mounted) return;
+    if (list == null) {
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+      return;
+    }
+
     const dist = ll.Distance();
-    final merged = <Station>[...live];
-    for (final s in osm) {
-      final dup = live.any(
-          (l) => dist.as(ll.LengthUnit.Meter, l.pos, s.pos) < 150);
-      if (!dup) merged.add(s);
-    }
-    for (final s in merged) {
+    final sp = await SharedPreferences.getInstance();
+    for (final s in list) {
       s.km = dist.as(ll.LengthUnit.Kilometer, _me, s.pos);
+      final raw = sp.getString('rep_${s.id}');
+      if (raw != null) {
+        try {
+          final m = jsonDecode(raw);
+          s.rate = _num(m['rate']);
+          s.queue = _num(m['queue'])?.round();
+          s.reportedAt = DateTime.fromMillisecondsSinceEpoch(m['ts'] as int);
+        } catch (_) {}
+      }
     }
-    merged.sort((a, b) => a.km.compareTo(b.km));
+    list.sort((a, b) => a.km.compareTo(b.km));
     if (!mounted) return;
     setState(() {
-      _stations = merged;
+      _stations = list;
       _loading = false;
     });
   }
@@ -955,6 +955,153 @@ class _RadarPageState extends State<RadarPage> {
   void _select(Station s) {
     setState(() => _sel = s);
     if (_mapReady) _map.move(s.pos, 15);
+    _openSheet(s);
+  }
+
+  Future<void> _go(Uri u) async {
+    try {
+      await launchUrl(u, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Open nahi ho paya')));
+      }
+    }
+  }
+
+  Future<void> _openSheet(Station s) async {
+    final rateC = TextEditingController(text: s.rate?.toString() ?? '');
+    final qC = TextEditingController(text: s.queue?.toString() ?? '');
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text('⛽', style: TextStyle(fontSize: 30)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(s.name,
+                            style: const TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.w900)),
+                        Text('${s.km.toStringAsFixed(1)} km door',
+                            style: const TextStyle(fontSize: 12, color: kMuted)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (s.hours != null) ...[
+                const SizedBox(height: 10),
+                Text('🕒 ${s.hours}',
+                    style: const TextStyle(fontSize: 13, color: kMuted)),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => _go(Uri.parse(
+                          'https://www.google.com/maps/dir/?api=1&destination=${s.pos.latitude},${s.pos.longitude}')),
+                      icon: const Icon(Icons.navigation_rounded),
+                      label: const Text('Navigate'),
+                    ),
+                  ),
+                  if (s.phone != null) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _go(Uri(
+                            scheme: 'tel',
+                            path: s.phone!.split(';').first.trim())),
+                        icon: const Icon(Icons.call_rounded),
+                        label: const Text('Call'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                s.reportedAt != null
+                    ? 'Aapki last report (${_ago(s.reportedAt!)})'
+                    : 'Rate / line update karo',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: rateC,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                          labelText: 'Rate ₹/kg', border: OutlineInputBorder()),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: qC,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'Line (gaadi)', border: OutlineInputBorder()),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () async {
+                    final rate = _num(rateC.text.trim());
+                    final q = _num(qC.text.trim())?.round();
+                    if (rate == null && q == null) {
+                      Navigator.pop(ctx);
+                      return;
+                    }
+                    final now = DateTime.now();
+                    final sp = await SharedPreferences.getInstance();
+                    await sp.setString(
+                        'rep_${s.id}',
+                        jsonEncode({
+                          'rate': rate,
+                          'queue': q,
+                          'ts': now.millisecondsSinceEpoch,
+                        }));
+                    if (mounted) {
+                      setState(() {
+                        s.rate = rate;
+                        s.queue = q;
+                        s.reportedAt = now;
+                      });
+                    }
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Color _queueColor(int? q) {
@@ -990,7 +1137,7 @@ class _RadarPageState extends State<RadarPage> {
             child: Icon(
               Icons.location_on,
               size: identical(s, _sel) ? 46 : 38,
-              color: s.live ? kGreen : const Color(0xFFFF8F3C),
+              color: s.reportedAt != null ? kGreen : const Color(0xFFFF8F3C),
             ),
           ),
         ),
@@ -1012,7 +1159,7 @@ class _RadarPageState extends State<RadarPage> {
                         Text('CNG Radar 📡',
                             style: TextStyle(
                                 fontSize: 24, fontWeight: FontWeight.w900)),
-                        Text('paas ke CNG pump, rate aur line',
+                        Text('paas ke CNG pump (OpenStreetMap)',
                             style: TextStyle(fontSize: 12, color: kMuted)),
                       ],
                     ),
@@ -1067,7 +1214,9 @@ class _RadarPageState extends State<RadarPage> {
                           child: Text(
                             _loading
                                 ? 'Pump dhoondh raha hu... 🔍'
-                                : 'Paas mein CNG pump nahi mila 🥲',
+                                : _failed
+                                    ? 'Internet check karo 🌐 phir refresh dabao'
+                                    : 'Paas mein CNG pump nahi mila 🥲',
                             style: const TextStyle(color: kMuted),
                           ),
                         )
@@ -1106,7 +1255,7 @@ class _RadarPageState extends State<RadarPage> {
                                                     fontWeight: FontWeight.w800)),
                                             const SizedBox(height: 2),
                                             Text(
-                                              '${s.km.toStringAsFixed(1)} km door${s.live ? '  •  🟢 LIVE' : ''}',
+                                              '${s.km.toStringAsFixed(1)} km door${s.reportedAt != null ? '  •  ${_ago(s.reportedAt!)}' : ''}',
                                               style: const TextStyle(
                                                   fontSize: 12, color: kMuted),
                                             ),
