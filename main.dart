@@ -20,6 +20,9 @@ const String kDataUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 // Calibration / rename password
 const String kPin = '9891';
 
+// Settings (sensor voltage) password
+const String kSettingsPin = '1234';
+
 // ---------- Light theme colors ----------
 const Color kInk = Color(0xFF2B2145);
 const Color kMuted = Color(0xFF7A6F99);
@@ -329,7 +332,7 @@ class _ShellState extends State<Shell> {
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.local_gas_station_rounded), label: 'Meter'),
-          NavigationDestination(icon: Icon(Icons.map_rounded), label: 'Radar'),
+          NavigationDestination(icon: Icon(Icons.map_rounded), label: 'CNG Pump'),
         ],
       ),
     );
@@ -359,7 +362,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   double _percent = 0;
   double _voltage = 0;
-  bool _connected = false;
+  final ValueNotifier<double> _vN = ValueNotifier<double>(0);
+  final ValueNotifier<bool> _connN = ValueNotifier<bool>(false);
+  bool get _connected => _connN.value;
+  set _connected(bool v) => _connN.value = v;
   bool _busy = false;
   bool _manual = false; // user ne khud disconnect kiya
   bool _named = false;
@@ -540,6 +546,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _percent = p.clamp(0, 100).toDouble();
           _voltage = v;
         });
+        _vN.value = v;
       }
     } catch (_) {}
   }
@@ -704,6 +711,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _openSettings() async {
+    final ok = await askPin(context, kSettingsPin, title: 'Settings 🔒');
+    if (!ok || !mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SettingsPage(voltage: _vN, connected: _connN, name: _name),
+    ));
+  }
+
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -725,6 +740,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _dataSub?.cancel();
     _connSub?.cancel();
     _device?.disconnect();
+    _vN.dispose();
+    _connN.dispose();
     super.dispose();
   }
 
@@ -795,18 +812,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     children: [
                       CngLogo(size: 46, anim: _loop),
                       const SizedBox(width: 10),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('CNG Buddy',
-                              style: TextStyle(
-                                  fontSize: 24, fontWeight: FontWeight.w900)),
-                          Text('tumhara cute gas meter',
-                              style: TextStyle(fontSize: 12, color: kMuted)),
-                        ],
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('CNG Buddy',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 24, fontWeight: FontWeight.w900)),
+                            Text('tumhara cute gas meter',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12, color: kMuted)),
+                          ],
+                        ),
                       ),
-                      const Spacer(),
                       _StatusChip(connected: _connected, text: _status, anim: _loop),
+                      IconButton(
+                        onPressed: _openSettings,
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.settings_rounded, color: kMuted),
+                      ),
                     ],
                   ),
                   AnimatedSize(
@@ -886,24 +913,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     children: [
                       Expanded(
                         child: _Pop(
-                          ms: 700,
-                          child: _InfoCard(
-                            emoji: '⚡',
-                            label: 'Sensor voltage',
-                            value: _connected ? '${_voltage.toStringAsFixed(2)} V' : '--',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _Pop(
                           ms: 950,
                           child: GestureDetector(
                             onTap: _connected
                                 ? () => _askRename(first: false)
                                 : null,
                             child: _InfoCard(
-                              emoji: '📡',
+                              emoji: '🚗',
                               label: _connected ? 'Tap karke naam badlo' : 'Device',
                               value: _connected ? _name : 'Offline',
                             ),
@@ -999,7 +1015,114 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 }
 
-// ---------- CNG Radar (OpenStreetMap, no backend) ----------
+// ---------- Password dialog + Settings ----------
+
+Future<bool> askPin(BuildContext context, String pin,
+    {String title = 'Password 🔒'}) async {
+  final c = TextEditingController();
+  String? err;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setD) => AlertDialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: c,
+          obscureText: true,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          maxLength: 4,
+          decoration: InputDecoration(
+            labelText: 'Password',
+            errorText: err,
+            counterText: '',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (c.text == pin) {
+                Navigator.pop(ctx, true);
+              } else {
+                setD(() => err = 'Galat password');
+              }
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    ),
+  );
+  return ok == true;
+}
+
+class SettingsPage extends StatelessWidget {
+  final ValueListenable<double> voltage;
+  final ValueListenable<bool> connected;
+  final String name;
+  const SettingsPage({
+    super.key,
+    required this.voltage,
+    required this.connected,
+    required this.name,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings ⚙️',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+      ),
+      extendBodyBehindAppBar: false,
+      body: Container(
+        decoration: kBgDeco,
+        width: double.infinity,
+        height: double.infinity,
+        padding: const EdgeInsets.all(20),
+        child: ValueListenableBuilder<bool>(
+          valueListenable: connected,
+          builder: (_, on, __) => ValueListenableBuilder<double>(
+            valueListenable: voltage,
+            builder: (_, v, __) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _InfoCard(
+                  emoji: '⚡',
+                  label: 'Sensor voltage (live)',
+                  value: on ? '${v.toStringAsFixed(2)} V' : '--',
+                ),
+                const SizedBox(height: 12),
+                _InfoCard(
+                  emoji: '🚗',
+                  label: 'Device',
+                  value: on ? name : 'Offline',
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  on
+                      ? 'Voltage meter se live aa raha hai. Calibration (Set Empty / Set Full) Home screen par hai.'
+                      : 'Meter connect nahi hai. Home par connect karo, phir yahan voltage dikhega.',
+                  style: const TextStyle(fontSize: 13, color: kMuted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- CNG Pump (OpenStreetMap + OSRM routing, no backend) ----------
 
 class Station {
   final String id;
@@ -1008,6 +1131,7 @@ class Station {
   final String? brand;
   final String? phone;
   final String? hours;
+  final bool custom; // user ne khud add kiya
   double km = 0;
   double? rate;
   int? queue;
@@ -1019,7 +1143,37 @@ class Station {
     this.brand,
     this.phone,
     this.hours,
+    this.custom = false,
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'lat': pos.latitude,
+        'lon': pos.longitude,
+        'brand': brand,
+        'phone': phone,
+        'hours': hours,
+      };
+
+  static Station? fromJson(dynamic m, {bool custom = false}) {
+    try {
+      final lat = _num(m['lat']);
+      final lon = _num(m['lon']);
+      if (lat == null || lon == null) return null;
+      return Station(
+        id: m['id'].toString(),
+        name: (m['name'] ?? 'CNG Pump').toString(),
+        pos: ll.LatLng(lat, lon),
+        brand: m['brand']?.toString(),
+        phone: m['phone']?.toString(),
+        hours: m['hours']?.toString(),
+        custom: custom,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 double? _num(dynamic v) {
@@ -1036,6 +1190,15 @@ String _ago(DateTime t) {
   return '${d.inDays} din pehle';
 }
 
+String _fmtDist(double m) =>
+    m < 1000 ? '${m.round()} m' : '${(m / 1000).toStringAsFixed(1)} km';
+
+String _fmtMin(double sec) {
+  final m = (sec / 60).round();
+  if (m < 60) return '$m min';
+  return '${m ~/ 60} ghanta ${m % 60} min';
+}
+
 class RadarPage extends StatefulWidget {
   const RadarPage({super.key});
 
@@ -1047,7 +1210,16 @@ class _RadarPageState extends State<RadarPage> {
   static const List<String> _mirrors = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
   ];
+
+  // India me bahut se CNG pump OSM par "fuel:cng" tag ke bina hote hain,
+  // isliye naam / brand / operator se bhi dhoondhte hain.
+  static const String _brands =
+      'CNG|IGL|MGL|Indraprastha|Mahanagar|Adani|Torrent|Green Gas|Think Gas|'
+      'Gujarat Gas|Sabarmati|Bharat Gas Resources|AG&P|Haryana City Gas|'
+      'Maharashtra Natural|Vadodara Gas|Central UP Gas|Assam Gas|Unison|'
+      'Siti Energy|Aavantika|Megha Gas|Bhagyanagar|GAIL Gas|IOAGPL';
 
   final fm.MapController _map = fm.MapController();
   ll.LatLng _me = const ll.LatLng(28.6139, 77.2090);
@@ -1055,8 +1227,18 @@ class _RadarPageState extends State<RadarPage> {
   bool _loading = true;
   bool _failed = false;
   bool _located = false;
+  bool _fromCache = false;
   List<Station> _stations = [];
   Station? _sel;
+
+  // route state
+  bool _routing = false;
+  bool _showSteps = false;
+  List<ll.LatLng> _routePts = [];
+  List<String> _routeSteps = [];
+  double? _routeM;
+  double? _routeSec;
+  Station? _routeTo;
 
   @override
   void initState() {
@@ -1087,26 +1269,40 @@ class _RadarPageState extends State<RadarPage> {
     }
   }
 
-  Future<List<Station>?> _fetchOsm(ll.LatLng c) async {
-    final q =
-        '[out:json][timeout:20];nwr["amenity"="fuel"]["fuel:cng"="yes"](around:10000,${c.latitude},${c.longitude});out center 60;';
+  String _query(ll.LatLng c, int r) {
+    final a = '(around:$r,${c.latitude},${c.longitude})';
+    return '[out:json][timeout:25];('
+        'nwr["amenity"="fuel"]["fuel:cng"="yes"]$a;'
+        'nwr["amenity"="fuel"]["fuel:compressed_natural_gas"="yes"]$a;'
+        'nwr["amenity"="fuel"]["name"~"$_brands",i]$a;'
+        'nwr["amenity"="fuel"]["brand"~"$_brands",i]$a;'
+        'nwr["amenity"="fuel"]["operator"~"$_brands",i]$a;'
+        ');out center 150;';
+  }
+
+  Future<List<Station>?> _overpass(String q) async {
     for (final url in _mirrors) {
       try {
         final r = await http.post(
           Uri.parse(url),
           headers: {'User-Agent': 'CNGBuddy/1.0'},
           body: {'data': q},
-        ).timeout(const Duration(seconds: 25));
+        ).timeout(const Duration(seconds: 28));
         if (r.statusCode != 200) continue;
         final d = jsonDecode(r.body);
+        final seen = <String>{};
         final out = <Station>[];
         for (final e in (d['elements'] as List)) {
           final tags = (e['tags'] ?? {}) as Map;
-          final lat = _num(e['lat'] ?? (e['center'] != null ? e['center']['lat'] : null));
-          final lon = _num(e['lon'] ?? (e['center'] != null ? e['center']['lon'] : null));
+          final lat =
+              _num(e['lat'] ?? (e['center'] != null ? e['center']['lat'] : null));
+          final lon =
+              _num(e['lon'] ?? (e['center'] != null ? e['center']['lon'] : null));
           if (lat == null || lon == null) continue;
+          final id = '${e['type']}${e['id']}';
+          if (!seen.add(id)) continue;
           out.add(Station(
-            id: '${e['type']}${e['id']}',
+            id: id,
             name: (tags['name'] ?? tags['brand'] ?? tags['operator'] ?? 'CNG Pump')
                 .toString(),
             pos: ll.LatLng(lat, lon),
@@ -1123,33 +1319,39 @@ class _RadarPageState extends State<RadarPage> {
     return null;
   }
 
-  Future<void> _load({bool recenter = false}) async {
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _failed = false;
-      });
+  // pehle 10 km, kam mile to 25 km tak badhao
+  Future<List<Station>?> _fetchOsm(ll.LatLng c) async {
+    List<Station>? best;
+    for (final r in const [10000, 25000]) {
+      final got = await _overpass(_query(c, r));
+      if (got == null) break;
+      best = got;
+      if (got.length >= 3) break;
     }
-    if (recenter || !_located) {
-      final loc = await _locate();
-      if (loc != null) {
-        _me = loc;
-        _located = true;
-        if (_mapReady) _map.move(_me, 13.5);
-      }
-    }
-    final list = await _fetchOsm(_me);
-    if (!mounted) return;
-    if (list == null) {
-      setState(() {
-        _loading = false;
-        _failed = true;
-      });
-      return;
-    }
+    return best;
+  }
 
+  Future<List<Station>> _loadCustom(SharedPreferences sp) async {
+    final raw = sp.getString('custom_stations');
+    if (raw == null) return [];
+    try {
+      return [
+        for (final m in (jsonDecode(raw) as List))
+          if (Station.fromJson(m, custom: true) != null)
+            Station.fromJson(m, custom: true)!
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _saveCustom(SharedPreferences sp) async {
+    await sp.setString('custom_stations',
+        jsonEncode([for (final s in _stations.where((s) => s.custom)) s.toJson()]));
+  }
+
+  void _applyReports(SharedPreferences sp, Iterable<Station> list) {
     const dist = ll.Distance();
-    final sp = await SharedPreferences.getInstance();
     for (final s in list) {
       s.km = dist.as(ll.LengthUnit.Kilometer, _me, s.pos);
       final raw = sp.getString('rep_${s.id}');
@@ -1162,11 +1364,73 @@ class _RadarPageState extends State<RadarPage> {
         } catch (_) {}
       }
     }
-    list.sort((a, b) => a.km.compareTo(b.km));
+  }
+
+  Future<void> _load({bool recenter = false}) async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _failed = false;
+        _fromCache = false;
+      });
+    }
+    if (recenter || !_located) {
+      final loc = await _locate();
+      if (loc != null) {
+        _me = loc;
+        _located = true;
+        if (_mapReady) _map.move(_me, 13.5);
+      }
+    }
+    final sp = await SharedPreferences.getInstance();
+    var list = await _fetchOsm(_me);
+    var cached = false;
+
+    if (list != null) {
+      await sp.setString(
+          'osm_cache',
+          jsonEncode({
+            'lat': _me.latitude,
+            'lon': _me.longitude,
+            'list': [for (final s in list) s.toJson()],
+          }));
+    } else {
+      // internet / server fail: pichla saved data dikhao (agar paas ka ho)
+      final raw = sp.getString('osm_cache');
+      if (raw != null) {
+        try {
+          final m = jsonDecode(raw);
+          final d = const ll.Distance().as(ll.LengthUnit.Kilometer, _me,
+              ll.LatLng(_num(m['lat'])!, _num(m['lon'])!));
+          if (d < 20) {
+            list = [
+              for (final e in (m['list'] as List))
+                if (Station.fromJson(e) != null) Station.fromJson(e)!
+            ];
+            cached = true;
+          }
+        } catch (_) {}
+      }
+    }
+
+    final customs = await _loadCustom(sp);
     if (!mounted) return;
+    if (list == null && customs.isEmpty) {
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+      return;
+    }
+
+    final all = <Station>[...?list, ...customs];
+    _applyReports(sp, all);
+    all.sort((a, b) => a.km.compareTo(b.km));
     setState(() {
-      _stations = list;
+      _stations = all;
       _loading = false;
+      _failed = list == null;
+      _fromCache = cached;
     });
   }
 
@@ -1180,11 +1444,165 @@ class _RadarPageState extends State<RadarPage> {
     try {
       await launchUrl(u, mode: LaunchMode.externalApplication);
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Open nahi ho paya')));
-      }
+      _snack('Open nahi ho paya');
     }
+  }
+
+  void _snack(String m) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(m),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ));
+  }
+
+  // ---------- route (OSRM free server) ----------
+
+  String? _stepText(dynamic st) {
+    final m = st['maneuver'] as Map;
+    final type = m['type']?.toString() ?? '';
+    final mod = m['modifier']?.toString();
+    final name = (st['name'] ?? '').toString();
+    final dist = _num(st['distance']) ?? 0;
+    if (type == 'arrive') return 'Pump pahunch gaye 🎉';
+    final act = switch (type) {
+      'depart' => 'Shuru karo',
+      'roundabout' || 'rotary' => 'Roundabout se nikalo',
+      _ => switch (mod) {
+          'left' => 'Left mudo',
+          'right' => 'Right mudo',
+          'slight left' => 'Halka left',
+          'slight right' => 'Halka right',
+          'sharp left' => 'Sharp left',
+          'sharp right' => 'Sharp right',
+          'uturn' => 'U-turn lo',
+          _ => 'Seedhe chalo',
+        },
+    };
+    return '$act${name.isNotEmpty ? ' • $name' : ''}  (${_fmtDist(dist)})';
+  }
+
+  Future<void> _planRoute(Station s) async {
+    setState(() => _routing = true);
+    try {
+      final u = Uri.parse(
+          'https://router.project-osrm.org/route/v1/driving/${_me.longitude},${_me.latitude};${s.pos.longitude},${s.pos.latitude}?overview=full&geometries=geojson&steps=true');
+      final r = await http
+          .get(u, headers: {'User-Agent': 'CNGBuddy/1.0'})
+          .timeout(const Duration(seconds: 20));
+      if (r.statusCode != 200) throw 'route';
+      final d = jsonDecode(r.body);
+      final rt = (d['routes'] as List).first;
+      final pts = <ll.LatLng>[
+        for (final c in (rt['geometry']['coordinates'] as List))
+          ll.LatLng(_num(c[1])!, _num(c[0])!)
+      ];
+      final steps = <String>[];
+      for (final leg in (rt['legs'] as List)) {
+        for (final st in (leg['steps'] as List)) {
+          final t = _stepText(st);
+          if (t != null) steps.add(t);
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _routePts = pts;
+        _routeSteps = steps;
+        _routeM = _num(rt['distance']);
+        _routeSec = _num(rt['duration']);
+        _routeTo = s;
+        _showSteps = false;
+      });
+      if (_mapReady && pts.length > 1) {
+        _map.fitCamera(fm.CameraFit.bounds(
+          bounds: fm.LatLngBounds.fromPoints(pts),
+          padding: const EdgeInsets.all(36),
+        ));
+      }
+    } catch (_) {
+      _snack('Route nahi mila. Internet check karo ya Google Maps se chalo.');
+    } finally {
+      if (mounted) setState(() => _routing = false);
+    }
+  }
+
+  void _clearRoute() {
+    setState(() {
+      _routePts = [];
+      _routeSteps = [];
+      _routeTo = null;
+      _routeM = null;
+      _routeSec = null;
+      _showSteps = false;
+    });
+    if (_mapReady) _map.move(_me, 13.5);
+  }
+
+  // ---------- pump add / delete (jab OSM me pump na ho) ----------
+
+  Future<void> _addCustom(ll.LatLng p) async {
+    final nameC = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        title: const Text('Yahan CNG pump add karein? ⛽',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: nameC,
+          autofocus: true,
+          maxLength: 30,
+          decoration: const InputDecoration(
+              labelText: 'Pump ka naam', hintText: 'jaise: IGL Sector 12'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final n = nameC.text.trim();
+              Navigator.pop(ctx, n.isEmpty ? 'CNG Pump' : n);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (name == null) return;
+    final s = Station(
+      id: 'c${DateTime.now().millisecondsSinceEpoch}',
+      name: name,
+      pos: p,
+      custom: true,
+    );
+    final sp = await SharedPreferences.getInstance();
+    _applyReports(sp, [s]);
+    if (!mounted) return;
+    setState(() {
+      _stations = [..._stations, s]..sort((a, b) => a.km.compareTo(b.km));
+    });
+    await _saveCustom(sp);
+    _snack('Pump add ho gaya ✨');
+  }
+
+  Future<void> _deleteCustom(Station s) async {
+    final sp = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _stations = _stations.where((e) => e.id != s.id).toList();
+      if (identical(_sel, s)) _sel = null;
+      if (_routeTo?.id == s.id) {
+        _routePts = [];
+        _routeSteps = [];
+        _routeTo = null;
+      }
+    });
+    await _saveCustom(sp);
   }
 
   Future<void> _openSheet(Station s) async {
@@ -1215,7 +1633,8 @@ class _RadarPageState extends State<RadarPage> {
                         Text(s.name,
                             style: const TextStyle(
                                 fontSize: 18, fontWeight: FontWeight.w900)),
-                        Text('${s.km.toStringAsFixed(1)} km door',
+                        Text(
+                            '${s.km.toStringAsFixed(1)} km door${s.custom ? '  •  aapka add kiya hua' : ''}',
                             style: const TextStyle(fontSize: 12, color: kMuted)),
                       ],
                     ),
@@ -1228,28 +1647,40 @@ class _RadarPageState extends State<RadarPage> {
                     style: const TextStyle(fontSize: 13, color: kMuted)),
               ],
               const SizedBox(height: 14),
-              Row(
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
                 children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () => _go(Uri.parse(
-                          'https://www.google.com/maps/dir/?api=1&destination=${s.pos.latitude},${s.pos.longitude}')),
-                      icon: const Icon(Icons.navigation_rounded),
-                      label: const Text('Navigate'),
-                    ),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _planRoute(s);
+                    },
+                    icon: const Icon(Icons.alt_route_rounded),
+                    label: const Text('Route dikhao'),
                   ),
-                  if (s.phone != null) ...[
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => _go(Uri(
-                            scheme: 'tel',
-                            path: s.phone!.split(';').first.trim())),
-                        icon: const Icon(Icons.call_rounded),
-                        label: const Text('Call'),
-                      ),
+                  OutlinedButton.icon(
+                    onPressed: () => _go(Uri.parse(
+                        'https://www.google.com/maps/dir/?api=1&destination=${s.pos.latitude},${s.pos.longitude}')),
+                    icon: const Icon(Icons.navigation_rounded),
+                    label: const Text('Google Maps'),
+                  ),
+                  if (s.phone != null)
+                    OutlinedButton.icon(
+                      onPressed: () => _go(Uri(
+                          scheme: 'tel', path: s.phone!.split(';').first.trim())),
+                      icon: const Icon(Icons.call_rounded),
+                      label: const Text('Call'),
                     ),
-                  ],
+                  if (s.custom)
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _deleteCustom(s);
+                      },
+                      icon: const Icon(Icons.delete_outline_rounded, color: kRed),
+                      label: const Text('Hatao', style: TextStyle(color: kRed)),
+                    ),
                 ],
               ),
               const SizedBox(height: 18),
@@ -1328,6 +1759,160 @@ class _RadarPageState extends State<RadarPage> {
     return kRed;
   }
 
+  Widget _routeCard() {
+    final to = _routeTo!;
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+      decoration: cardDeco(color: const Color(0xFFEAF2FF), r: 20),
+      child: Row(
+        children: [
+          const Text('🧭', style: TextStyle(fontSize: 24)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(to.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w800)),
+                Text(
+                    '${_fmtDist(_routeM ?? 0)}  •  ${_fmtMin(_routeSec ?? 0)}',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF3A6FD8))),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _showSteps = !_showSteps),
+            child: Text(_showSteps ? 'Pump list' : 'Steps'),
+          ),
+          IconButton(
+            onPressed: _clearRoute,
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stepsList() {
+    return ListView.separated(
+      padding: const EdgeInsets.only(top: 10, bottom: 12),
+      itemCount: _routeSteps.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: cardDeco(r: 16),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 13,
+              backgroundColor: const Color(0xFFFFD9EA),
+              child: Text('${i + 1}',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(_routeSteps[i],
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _stationList() {
+    if (_stations.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Text(
+            _loading
+                ? 'Pump dhoondh raha hu... 🔍'
+                : _failed
+                    ? 'Internet check karo 🌐 phir refresh dabao'
+                    : 'Paas mein CNG pump nahi mila 🥲\nMap pe pump ki jagah long-press karke add kar sakte ho',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: kMuted),
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.only(bottom: 12),
+      itemCount: _stations.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) {
+        final s = _stations[i];
+        final q = s.queue;
+        return _Pop(
+          ms: 400 + (i < 6 ? i : 6) * 80,
+          child: GestureDetector(
+            onTap: () => _select(s),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: cardDeco(
+                color: identical(s, _sel) ? const Color(0xFFFFE9F3) : Colors.white,
+                r: 22,
+              ),
+              child: Row(
+                children: [
+                  const Text('⛽', style: TextStyle(fontSize: 26)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(s.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${s.km.toStringAsFixed(1)} km door${s.custom ? '  •  mera add kiya' : ''}${s.reportedAt != null ? '  •  ${_ago(s.reportedAt!)}' : ''}',
+                          style: const TextStyle(fontSize: 12, color: kMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        s.rate != null ? '₹${s.rate!.toStringAsFixed(1)}/kg' : '₹ --',
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFD9930D)),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        q != null ? '🚗 $q gaadi' : '🚗 --',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: _queueColor(q)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final markers = <fm.Marker>[
@@ -1354,7 +1939,11 @@ class _RadarPageState extends State<RadarPage> {
             child: Icon(
               Icons.location_on,
               size: identical(s, _sel) ? 46 : 38,
-              color: s.reportedAt != null ? kGreen : const Color(0xFFFF8F3C),
+              color: s.custom
+                  ? const Color(0xFF8E7CFF)
+                  : s.reportedAt != null
+                      ? kGreen
+                      : const Color(0xFFFF8F3C),
             ),
           ),
         ),
@@ -1372,28 +1961,43 @@ class _RadarPageState extends State<RadarPage> {
                   children: [
                     const CngLogo(size: 40),
                     const SizedBox(width: 10),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('CNG Radar 📡',
-                            style: TextStyle(
-                                fontSize: 22, fontWeight: FontWeight.w900)),
-                        Text('paas ke CNG pump (OpenStreetMap)',
-                            style: TextStyle(fontSize: 12, color: kMuted)),
-                      ],
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('CNG Pump ⛽',
+                              style: TextStyle(
+                                  fontSize: 22, fontWeight: FontWeight.w900)),
+                          Text('paas ke CNG pump • map pe long-press = pump add',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 11.5, color: kMuted)),
+                        ],
+                      ),
                     ),
-                    const Spacer(),
-                    _loading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2.5))
+                    _loading || _routing
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2.5)),
+                          )
                         : IconButton(
                             onPressed: () => _load(recenter: true),
                             icon: const Icon(Icons.refresh_rounded),
                           ),
                   ],
                 ),
+                if (_fromCache)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text('Offline hu — pichla saved data dikha raha hu',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.orange.shade800)),
+                  ),
                 const SizedBox(height: 12),
                 Container(
                   height: 240,
@@ -1405,6 +2009,7 @@ class _RadarPageState extends State<RadarPage> {
                       options: fm.MapOptions(
                         initialCenter: _me,
                         initialZoom: 13,
+                        onLongPress: (tp, point) => _addCustom(point),
                         onMapReady: () {
                           _mapReady = true;
                           if (_located) _map.move(_me, 13.5);
@@ -1416,99 +2021,37 @@ class _RadarPageState extends State<RadarPage> {
                               'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'com.cngmeter.cng_meter',
                         ),
+                        if (_routePts.length > 1)
+                          fm.PolylineLayer(
+                            polylines: [
+                              fm.Polyline(
+                                points: _routePts,
+                                strokeWidth: 5,
+                                color: const Color(0xFF4C8DFF),
+                                borderStrokeWidth: 2,
+                                borderColor: Colors.white,
+                              ),
+                            ],
+                          ),
                         fm.MarkerLayer(markers: markers),
                         const fm.RichAttributionWidget(
                           attributions: [
-                            fm.TextSourceAttribution('© OpenStreetMap contributors'),
+                            fm.TextSourceAttribution(
+                                '© OpenStreetMap contributors • routing: OSRM'),
                           ],
                         ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                if (_routeTo != null) _routeCard(),
+                const SizedBox(height: 4),
                 Expanded(
-                  child: _stations.isEmpty
-                      ? Center(
-                          child: Text(
-                            _loading
-                                ? 'Pump dhoondh raha hu... 🔍'
-                                : _failed
-                                    ? 'Internet check karo 🌐 phir refresh dabao'
-                                    : 'Paas mein CNG pump nahi mila 🥲',
-                            style: const TextStyle(color: kMuted),
-                          ),
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          itemCount: _stations.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 10),
-                          itemBuilder: (_, i) {
-                            final s = _stations[i];
-                            final q = s.queue;
-                            return _Pop(
-                              ms: 400 + (i < 6 ? i : 6) * 80,
-                              child: GestureDetector(
-                                onTap: () => _select(s),
-                                child: Container(
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: cardDeco(
-                                    color: identical(s, _sel)
-                                        ? const Color(0xFFFFE9F3)
-                                        : Colors.white,
-                                    r: 22,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Text('⛽', style: TextStyle(fontSize: 26)),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(s.name,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.w800)),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              '${s.km.toStringAsFixed(1)} km door${s.reportedAt != null ? '  •  ${_ago(s.reportedAt!)}' : ''}',
-                                              style: const TextStyle(
-                                                  fontSize: 12, color: kMuted),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Column(
-                                        crossAxisAlignment: CrossAxisAlignment.end,
-                                        children: [
-                                          Text(
-                                            s.rate != null
-                                                ? '₹${s.rate!.toStringAsFixed(1)}/kg'
-                                                : '₹ --',
-                                            style: const TextStyle(
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.w800,
-                                                color: Color(0xFFD9930D)),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            q != null ? '🚗 $q gaadi' : '🚗 --',
-                                            style: TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w700,
-                                                color: _queueColor(q)),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+                  child: (_routeTo != null && _showSteps)
+                      ? _stepsList()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: _stationList(),
                         ),
                 ),
               ],
