@@ -6,10 +6,22 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart' as ll;
+import 'package:shared_preferences/shared_preferences.dart';
 
 const String kServiceUuid = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const String kCmdUuid = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 const String kDataUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+// Calibration / rename password
+const String kPin = '9891';
+
+// Backend (CNG SaaS) base URL for live rate + queue. Example: 'https://your-api.onrender.com'
+// Khali chhodoge to sirf OSM se pumps dikhenge (rate/queue "--").
+const String kApiBase = '';
 
 enum Mood { sleepy, happy, ok, worried, sad }
 
@@ -33,10 +45,53 @@ class CngApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFFFF9EC7),
         scaffoldBackgroundColor: const Color(0xFF1E1747),
       ),
-      home: const HomePage(),
+      home: const Shell(),
     );
   }
 }
+
+// ---------- Shell (bottom tabs) ----------
+
+class Shell extends StatefulWidget {
+  const Shell({super.key});
+
+  @override
+  State<Shell> createState() => _ShellState();
+}
+
+class _ShellState extends State<Shell> {
+  int _i = 0;
+  bool _radarOpened = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _i,
+        children: [
+          const HomePage(),
+          _radarOpened ? const RadarPage() : const SizedBox.shrink(),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _i,
+        backgroundColor: const Color(0xFF16305E),
+        indicatorColor: const Color(0x44FF9EC7),
+        onDestinationSelected: (v) => setState(() {
+          _i = v;
+          if (v == 1) _radarOpened = true;
+        }),
+        destinations: const [
+          NavigationDestination(
+              icon: Icon(Icons.local_gas_station_rounded), label: 'Meter'),
+          NavigationDestination(icon: Icon(Icons.map_rounded), label: 'Radar'),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------- Meter page ----------
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -55,11 +110,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late final AnimationController _blink;
   late final AnimationController _jump;
   Timer? _blinkTimer;
+  Timer? _retry;
 
   double _percent = 0;
   double _voltage = 0;
   bool _connected = false;
   bool _busy = false;
+  bool _manual = false; // user ne khud disconnect kiya
+  bool _named = false;
+  bool _askedName = false;
+  String? _savedId;
+  String _name = 'CNG Meter';
   String _status = 'Sleeping';
 
   @override
@@ -75,6 +136,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (mounted) _blink.reverse();
       });
     });
+    _init();
+  }
+
+  Future<void> _init() async {
+    final sp = await SharedPreferences.getInstance();
+    _savedId = sp.getString('dev_id');
+    _name = sp.getString('dev_name') ?? _name;
+    _named = sp.getBool('named') ?? false;
+    if (mounted) setState(() {});
+    _retry = Timer.periodic(const Duration(seconds: 12), (_) {
+      if (mounted && !_connected && !_busy && !_manual) {
+        _scanAndConnect(silent: true);
+      }
+    });
+    _scanAndConnect(silent: true);
   }
 
   Mood get _mood {
@@ -102,8 +178,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _poke() => _jump.forward(from: 0);
 
-  Future<void> _scanAndConnect() async {
+  Future<void> _scanAndConnect({bool silent = false}) async {
     if (_busy) return;
+    if (!silent) _manual = false;
     setState(() {
       _busy = true;
       _status = 'Searching...';
@@ -114,39 +191,51 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (!await FlutterBluePlus.isSupported) {
         throw 'Bluetooth is not supported on this phone';
       }
-      if (Platform.isAndroid) {
+      if (Platform.isAndroid &&
+          FlutterBluePlus.adapterStateNow != BluetoothAdapterState.on) {
+        if (silent) throw 'bluetooth off';
         await FlutterBluePlus.turnOn();
       }
 
+      final secs = silent ? 6 : 10;
+      final wanted = silent ? _savedId : null;
       BluetoothDevice? found;
       final done = Completer<void>();
       scanSub = FlutterBluePlus.onScanResults.listen((results) {
-        if (results.isNotEmpty && found == null) {
-          found = results.last.device;
-          if (!done.isCompleted) done.complete();
+        for (final r in results) {
+          if (found == null &&
+              (wanted == null || r.device.remoteId.str == wanted)) {
+            found = r.device;
+            if (!done.isCompleted) done.complete();
+          }
         }
       });
 
       await FlutterBluePlus.startScan(
         withServices: [Guid(kServiceUuid)],
-        timeout: const Duration(seconds: 10),
+        timeout: Duration(seconds: secs),
       );
       await Future.any([
         done.future,
-        Future.delayed(const Duration(seconds: 10)),
+        Future.delayed(Duration(seconds: secs)),
       ]);
       await FlutterBluePlus.stopScan();
       await scanSub.cancel();
       scanSub = null;
 
       if (found == null) {
-        throw 'CNG_Meter not found. ESP32 ON hai? Phir se try karo.';
+        throw 'Meter nahi mila. Meter ON hai? Paas aake phir try karo.';
       }
 
       setState(() => _status = 'Connecting...');
       final dev = found!;
       await dev.connect(timeout: const Duration(seconds: 10));
       _device = dev;
+
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('dev_id', dev.remoteId.str);
+      _savedId = dev.remoteId.str;
+      if (!_named && dev.platformName.isNotEmpty) _name = dev.platformName;
 
       _connSub?.cancel();
       _connSub = dev.connectionState.listen((s) {
@@ -176,6 +265,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _status = 'Awake';
       });
       _poke();
+
+      if (!_named && !_askedName) {
+        _askedName = true;
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _askRename(first: true));
+      }
     } catch (e) {
       await scanSub?.cancel();
       if (mounted) {
@@ -183,7 +278,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _connected = false;
           _status = 'Sleeping';
         });
-        _snack(e.toString());
+        if (!silent) _snack(e.toString());
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -205,6 +300,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _disconnect() async {
+    _manual = true;
     await _dataSub?.cancel();
     await _device?.disconnect();
     if (mounted) {
@@ -216,24 +312,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _sendCmd(String cmd, String label) async {
+    final pinC = TextEditingController();
+    String? err;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF2E2563),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
-        content: Text(
-          cmd == 'RESET'
-              ? 'Calibration default par reset hogi.'
-              : 'Abhi ki sensor voltage (${_voltage.toStringAsFixed(2)} V) ko '
-                  '${cmd == 'SETEMPTY' ? '0% (empty)' : '100% (full)'} set kiya jayega.',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          backgroundColor: const Color(0xFF2E2563),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                cmd == 'RESET'
+                    ? 'Calibration default par reset hogi.'
+                    : 'Abhi ki sensor voltage (${_voltage.toStringAsFixed(2)} V) ko '
+                        '${cmd == 'SETEMPTY' ? '0% (empty)' : '100% (full)'} set kiya jayega.',
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: pinC,
+                obscureText: true,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                decoration: InputDecoration(
+                  labelText: 'Password 🔒',
+                  errorText: err,
+                  counterText: '',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                if (pinC.text == kPin) {
+                  Navigator.pop(ctx, true);
+                } else {
+                  setD(() => err = 'Galat password');
+                }
+              },
+              child: const Text('OK'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true), child: const Text('OK')),
-        ],
       ),
     );
     if (ok != true) return;
@@ -242,6 +370,91 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _snack('Done ✨');
     } catch (e) {
       _snack('Command failed: $e');
+    }
+  }
+
+  Future<void> _askRename({required bool first}) async {
+    if (!mounted) return;
+    final nameC = TextEditingController(text: first ? '' : _name);
+    final pinC = TextEditingController();
+    String? err;
+    final res = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          backgroundColor: const Color(0xFF2E2563),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          title: Text(first ? 'Apne meter ka naam rakho 🏷️' : 'Naam badlo ✏️',
+              style: const TextStyle(fontWeight: FontWeight.w800)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameC,
+                maxLength: 20,
+                autofocus: true,
+                decoration: const InputDecoration(
+                    labelText: 'Naam', hintText: 'jaise: Swift CNG'),
+              ),
+              if (!first)
+                TextField(
+                  controller: pinC,
+                  obscureText: true,
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  decoration: const InputDecoration(
+                      labelText: 'Password 🔒', counterText: ''),
+                ),
+              if (err != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(err!,
+                      style: const TextStyle(color: Color(0xFFFF7B8A))),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(first ? 'Baad mein' : 'Cancel')),
+            FilledButton(
+              onPressed: () {
+                final n = nameC.text
+                    .trim()
+                    .replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '');
+                if (n.isEmpty) {
+                  setD(() => err = 'Naam likho (sirf letters/numbers)');
+                  return;
+                }
+                if (!first && pinC.text != kPin) {
+                  setD(() => err = 'Galat password');
+                  return;
+                }
+                Navigator.pop(ctx, n);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final sp = await SharedPreferences.getInstance();
+    if (first) {
+      await sp.setBool('named', true);
+      _named = true;
+    }
+    if (res == null) return;
+
+    await sp.setString('dev_name', res);
+    await sp.setBool('named', true);
+    _named = true;
+    try {
+      await _cmdChar?.write(utf8.encode('SETNAME:$res'));
+    } catch (_) {}
+    if (mounted) {
+      setState(() => _name = res);
+      _snack('Naam save ✨ Meter restart hoke apne aap connect hoga');
     }
   }
 
@@ -259,6 +472,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _blinkTimer?.cancel();
+    _retry?.cancel();
     _loop.dispose();
     _blink.dispose();
     _jump.dispose();
@@ -446,10 +660,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       Expanded(
                         child: _Pop(
                           ms: 950,
-                          child: _InfoCard(
-                            emoji: '📡',
-                            label: 'Device',
-                            value: _connected ? 'CNG_Meter' : 'Offline',
+                          child: GestureDetector(
+                            onTap: _connected
+                                ? () => _askRename(first: false)
+                                : null,
+                            child: _InfoCard(
+                              emoji: '📡',
+                              label: _connected ? 'Tap karke naam badlo' : 'Device',
+                              value: _connected ? _name : 'Offline',
+                            ),
                           ),
                         ),
                       ),
@@ -542,6 +761,378 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 }
 
+// ---------- Radar (OSM pumps + live rate/queue) ----------
+
+class Station {
+  final String name;
+  final ll.LatLng pos;
+  final double? rate;
+  final int? queue;
+  final bool live;
+  double km = 0;
+  Station({
+    required this.name,
+    required this.pos,
+    this.rate,
+    this.queue,
+    this.live = false,
+  });
+}
+
+double? _num(dynamic v) {
+  if (v == null) return null;
+  if (v is num) return v.toDouble();
+  return double.tryParse(v.toString());
+}
+
+class RadarPage extends StatefulWidget {
+  const RadarPage({super.key});
+
+  @override
+  State<RadarPage> createState() => _RadarPageState();
+}
+
+class _RadarPageState extends State<RadarPage> {
+  final fm.MapController _map = fm.MapController();
+  ll.LatLng _me = const ll.LatLng(28.6139, 77.2090);
+  bool _mapReady = false;
+  bool _loading = true;
+  bool _located = false;
+  List<Station> _stations = [];
+  Station? _sel;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _load(recenter: true);
+    _timer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (mounted) _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<ll.LatLng?> _locate() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return null;
+      }
+      final p = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+      return ll.LatLng(p.latitude, p.longitude);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Station>> _fetchLive(ll.LatLng c) async {
+    if (kApiBase.isEmpty) return [];
+    try {
+      final r = await http
+          .get(Uri.parse(
+              '$kApiBase/api/public/stations?lat=${c.latitude}&lng=${c.longitude}&radius=15'))
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return [];
+      final d = jsonDecode(r.body);
+      final list = d is List ? d : (d is Map ? (d['stations'] ?? d['data'] ?? []) : []);
+      final out = <Station>[];
+      for (final m in list as List) {
+        if (m is! Map) continue;
+        final lat = _num(m['lat'] ?? m['latitude']);
+        final lng = _num(m['lng'] ?? m['lon'] ?? m['longitude']);
+        if (lat == null || lng == null) continue;
+        out.add(Station(
+          name: (m['name'] ?? 'CNG Pump').toString(),
+          pos: ll.LatLng(lat, lng),
+          rate: _num(m['rate'] ?? m['cngRate'] ?? m['price']),
+          queue: _num(m['queue'] ?? m['queueLength'] ?? m['waiting'])?.round(),
+          live: true,
+        ));
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Station>> _fetchOsm(ll.LatLng c) async {
+    final q =
+        '[out:json][timeout:20];nwr["amenity"="fuel"]["fuel:cng"="yes"](around:10000,${c.latitude},${c.longitude});out center 40;';
+    try {
+      final r = await http.post(
+        Uri.parse('https://overpass-api.de/api/interpreter'),
+        headers: {'User-Agent': 'CNGBuddy/1.0'},
+        body: {'data': q},
+      ).timeout(const Duration(seconds: 25));
+      if (r.statusCode != 200) return [];
+      final d = jsonDecode(r.body);
+      final out = <Station>[];
+      for (final e in (d['elements'] as List)) {
+        final tags = (e['tags'] ?? {}) as Map;
+        final lat = _num(e['lat'] ?? (e['center'] != null ? e['center']['lat'] : null));
+        final lon = _num(e['lon'] ?? (e['center'] != null ? e['center']['lon'] : null));
+        if (lat == null || lon == null) continue;
+        out.add(Station(
+          name: (tags['name'] ?? tags['brand'] ?? 'CNG Pump').toString(),
+          pos: ll.LatLng(lat, lon),
+        ));
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _load({bool recenter = false}) async {
+    if (mounted) setState(() => _loading = true);
+    if (recenter || !_located) {
+      final loc = await _locate();
+      if (loc != null) {
+        _me = loc;
+        _located = true;
+        if (_mapReady) _map.move(_me, 13.5);
+      }
+    }
+    final live = await _fetchLive(_me);
+    final osm = await _fetchOsm(_me);
+    const dist = ll.Distance();
+    final merged = <Station>[...live];
+    for (final s in osm) {
+      final dup = live.any(
+          (l) => dist.as(ll.LengthUnit.Meter, l.pos, s.pos) < 150);
+      if (!dup) merged.add(s);
+    }
+    for (final s in merged) {
+      s.km = dist.as(ll.LengthUnit.Kilometer, _me, s.pos);
+    }
+    merged.sort((a, b) => a.km.compareTo(b.km));
+    if (!mounted) return;
+    setState(() {
+      _stations = merged;
+      _loading = false;
+    });
+  }
+
+  void _select(Station s) {
+    setState(() => _sel = s);
+    if (_mapReady) _map.move(s.pos, 15);
+  }
+
+  Color _queueColor(int? q) {
+    if (q == null) return Colors.white54;
+    if (q <= 3) return const Color(0xFF7CF5C2);
+    if (q <= 8) return const Color(0xFFFFC27A);
+    return const Color(0xFFFF7B8A);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final markers = <fm.Marker>[
+      fm.Marker(
+        point: _me,
+        width: 26,
+        height: 26,
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF4C8DFF),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+          ),
+        ),
+      ),
+      for (final s in _stations)
+        fm.Marker(
+          point: s.pos,
+          width: 44,
+          height: 44,
+          child: GestureDetector(
+            onTap: () => _select(s),
+            child: Icon(
+              Icons.location_on,
+              size: identical(s, _sel) ? 46 : 38,
+              color: s.live ? const Color(0xFF16C784) : const Color(0xFFFF8F3C),
+            ),
+          ),
+        ),
+    ];
+
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF2A1B5C), Color(0xFF16305E)],
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('CNG Radar 📡',
+                            style: TextStyle(
+                                fontSize: 24, fontWeight: FontWeight.w900)),
+                        Text('paas ke CNG pump, rate aur line',
+                            style: TextStyle(fontSize: 12, color: Colors.white60)),
+                      ],
+                    ),
+                    const Spacer(),
+                    _loading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2.5))
+                        : IconButton(
+                            onPressed: () => _load(recenter: true),
+                            icon: const Icon(Icons.refresh_rounded),
+                          ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 240,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: fm.FlutterMap(
+                      mapController: _map,
+                      options: fm.MapOptions(
+                        initialCenter: _me,
+                        initialZoom: 13,
+                        onMapReady: () {
+                          _mapReady = true;
+                          if (_located) _map.move(_me, 13.5);
+                        },
+                      ),
+                      children: [
+                        fm.TileLayer(
+                          urlTemplate:
+                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'com.cngmeter.cng_meter',
+                        ),
+                        fm.MarkerLayer(markers: markers),
+                        const fm.RichAttributionWidget(
+                          attributions: [
+                            fm.TextSourceAttribution('© OpenStreetMap contributors'),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: _stations.isEmpty
+                      ? Center(
+                          child: Text(
+                            _loading
+                                ? 'Pump dhoondh raha hu... 🔍'
+                                : 'Paas mein CNG pump nahi mila 🥲',
+                            style: const TextStyle(color: Colors.white60),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          itemCount: _stations.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          itemBuilder: (_, i) {
+                            final s = _stations[i];
+                            final q = s.queue;
+                            return _Pop(
+                              ms: 400 + (i < 6 ? i : 6) * 80,
+                              child: GestureDetector(
+                                onTap: () => _select(s),
+                                child: Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white
+                                        .withOpacity(identical(s, _sel) ? 0.16 : 0.08),
+                                    borderRadius: BorderRadius.circular(22),
+                                    border: Border.all(
+                                        color: Colors.white.withOpacity(0.12)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Text('⛽', style: TextStyle(fontSize: 26)),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(s.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w800)),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '${s.km.toStringAsFixed(1)} km door${s.live ? '  •  🟢 LIVE' : ''}',
+                                              style: const TextStyle(
+                                                  fontSize: 12, color: Colors.white60),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            s.rate != null
+                                                ? '₹${s.rate!.toStringAsFixed(1)}/kg'
+                                                : '₹ --',
+                                            style: const TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w800,
+                                                color: Color(0xFFFFE066)),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            q != null ? '🚗 $q gaadi' : '🚗 --',
+                                            style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: _queueColor(q)),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------- Small widgets ----------
 
 class _StatusChip extends StatelessWidget {
@@ -589,6 +1180,7 @@ class _InfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
@@ -601,8 +1193,13 @@ class _InfoCard extends StatelessWidget {
           Text(emoji, style: const TextStyle(fontSize: 22)),
           const SizedBox(height: 6),
           Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.white60)),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Colors.white60)),
         ],
       ),
     );
