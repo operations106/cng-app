@@ -1464,3 +1464,519 @@ class _RadarPageState extends State<RadarPage> {
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(s.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w800)),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '${s.km.toStringAsFixed(1)} km door${s.reportedAt != null ? '  •  ${_ago(s.reportedAt!)}' : ''}',
+                                              style: const TextStyle(
+                                                  fontSize: 12, color: kMuted),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            s.rate != null
+                                                ? '₹${s.rate!.toStringAsFixed(1)}/kg'
+                                                : '₹ --',
+                                            style: const TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w800,
+                                                color: Color(0xFFD9930D)),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            q != null ? '🚗 $q gaadi' : '🚗 --',
+                                            style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: _queueColor(q)),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- Small widgets ----------
+
+class _StatusChip extends StatelessWidget {
+  final bool connected;
+  final String text;
+  final Animation<double> anim;
+  const _StatusChip(
+      {required this.connected, required this.text, required this.anim});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = connected ? kGreen : kMuted;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedBuilder(
+            animation: anim,
+            builder: (_, __) {
+              final s = connected ? 1 + 0.35 * math.sin(anim.value * 2 * math.pi) : 1.0;
+              return Transform.scale(
+                  scale: s, child: Icon(Icons.circle, size: 10, color: c));
+            },
+          ),
+          const SizedBox(width: 7),
+          Text(text,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c)),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  final String emoji;
+  final String label;
+  final String value;
+  const _InfoCard({required this.emoji, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: cardDeco(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 22)),
+          const SizedBox(height: 6),
+          Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: kMuted)),
+        ],
+      ),
+    );
+  }
+}
+
+class _Pop extends StatelessWidget {
+  final Widget child;
+  final int ms;
+  const _Pop({required this.child, required this.ms});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: ms),
+      curve: Curves.elasticOut,
+      builder: (context, v, c) => Transform.scale(
+        scale: v,
+        child: Opacity(opacity: v.clamp(0.0, 1.0).toDouble(), child: c),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _BouncyButton extends StatefulWidget {
+  final VoidCallback? onTap;
+  final Widget child;
+  const _BouncyButton({required this.onTap, required this.child});
+
+  @override
+  State<_BouncyButton> createState() => _BouncyButtonState();
+}
+
+class _BouncyButtonState extends State<_BouncyButton> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapCancel: () => setState(() => _down = false),
+      onTapUp: (_) => setState(() => _down = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _down ? 0.93 : 1,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        child: Opacity(opacity: widget.onTap == null ? 0.85 : 1, child: widget.child),
+      ),
+    );
+  }
+}
+
+class _SoftButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _SoftButton({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return _BouncyButton(
+      onTap: onTap,
+      child: Container(
+        height: 48,
+        alignment: Alignment.center,
+        decoration: cardDeco(r: 24),
+        child: Text(label,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+}
+
+// ---------- Painters ----------
+
+class StarsPainter extends CustomPainter {
+  final double t;
+  StarsPainter(this.t);
+
+  static final List<List<double>> _stars = _gen();
+
+  static List<List<double>> _gen() {
+    final r = math.Random(7);
+    return List.generate(
+      28,
+      (_) => [r.nextDouble(), r.nextDouble(), 1.5 + r.nextDouble() * 2.5, r.nextDouble() * 6.28],
+    );
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (int i = 0; i < _stars.length; i++) {
+      final s = _stars[i];
+      final op = 0.08 + 0.32 * (0.5 + 0.5 * math.sin(t * 2 * math.pi + s[3]));
+      final base = i.isEven ? const Color(0xFFFF8FC4) : const Color(0xFFA48CFF);
+      canvas.drawCircle(
+        Offset(s[0] * size.width, s[1] * size.height),
+        s[2],
+        Paint()..color = base.withOpacity(op),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant StarsPainter old) => old.t != t;
+}
+
+class TankPainter extends CustomPainter {
+  final double level;
+  final double t;
+  final double blink;
+  final Color color;
+  final Mood mood;
+
+  const TankPainter({
+    required this.level,
+    required this.t,
+    required this.blink,
+    required this.color,
+    required this.mood,
+  });
+
+  static const Color ink = Color(0xFF2B2145);
+  static const double tau = math.pi * 2;
+
+  Path _wavePath(Rect r, double surface, double amp, double phase, double freq) {
+    final p = Path()..moveTo(r.left, r.bottom + 2);
+    for (double x = 0; x <= r.width; x += 4) {
+      p.lineTo(r.left + x,
+          surface + math.sin(x / r.width * tau * freq + phase) * amp);
+    }
+    p.lineTo(r.right, r.bottom + 2);
+    p.close();
+    return p;
+  }
+
+  void _star(Canvas canvas, Offset c, double r, Paint paint) {
+    final p = Path();
+    for (int i = 0; i < 8; i++) {
+      final a = i * math.pi / 4 - math.pi / 2;
+      final rad = i.isEven ? r : r * 0.35;
+      final pt = Offset(c.dx + math.cos(a) * rad, c.dy + math.sin(a) * rad);
+      if (i == 0) {
+        p.moveTo(pt.dx, pt.dy);
+      } else {
+        p.lineTo(pt.dx, pt.dy);
+      }
+    }
+    p.close();
+    canvas.drawPath(p, paint);
+  }
+
+  void _text(Canvas canvas, String s, Offset o, double fs, double op) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: s,
+        style: TextStyle(
+            color: const Color(0xFF9B8CFF).withOpacity(op),
+            fontSize: fs,
+            fontWeight: FontWeight.w900),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, o);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final cx = w / 2;
+    final body = RRect.fromRectAndRadius(
+      Rect.fromLTWH(30, 46, w - 60, size.height - 76),
+      const Radius.circular(84),
+    );
+    final pink = Paint()..color = const Color(0xFFFFA8C8);
+
+    // ground shadow
+    canvas.drawOval(
+        Rect.fromCenter(center: Offset(cx, body.bottom + 16), width: 170, height: 12),
+        Paint()..color = const Color(0x225B4B8A));
+
+    // feet
+    canvas.drawOval(
+        Rect.fromCenter(center: Offset(cx - 48, body.bottom + 6), width: 56, height: 26),
+        pink);
+    canvas.drawOval(
+        Rect.fromCenter(center: Offset(cx + 48, body.bottom + 6), width: 56, height: 26),
+        pink);
+
+    // cap
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(cx, 36), width: 60, height: 30),
+          const Radius.circular(12)),
+      Paint()..color = const Color(0xFFFFD166),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(cx, 32), width: 36, height: 6),
+          const Radius.circular(3)),
+      Paint()..color = Colors.white.withOpacity(0.7),
+    );
+
+    // hands (behind body)
+    final happy = mood == Mood.happy;
+    final baseY = happy ? 150.0 : 190.0;
+    final amp = happy ? 14.0 : 5.0;
+    final f = happy ? 2.0 : 1.0;
+    canvas.drawCircle(
+        Offset(body.left + 2, baseY + math.sin(tau * t * f) * amp), 15, pink);
+    canvas.drawCircle(
+        Offset(body.right - 2, baseY + math.sin(tau * t * f + math.pi) * amp), 15, pink);
+
+    // glass body
+    canvas.drawRRect(
+      body,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFFFFFF), Color(0xFFEDE7FF)],
+        ).createShader(body.outerRect),
+    );
+
+    // liquid
+    final surface = body.bottom - body.height * level;
+    if (level > 0.005) {
+      canvas.save();
+      canvas.clipRRect(body);
+      final rect = body.outerRect;
+      canvas.drawPath(
+        _wavePath(rect, surface, 6, tau * t + 1.5, 1.5),
+        Paint()..color = color.withOpacity(0.5),
+      );
+      canvas.drawPath(
+        _wavePath(rect, surface, 6, -tau * t, 1.0),
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [color, Color.lerp(color, Colors.black, 0.2)!],
+          ).createShader(Rect.fromLTRB(
+              rect.left, surface - 8, rect.right, rect.bottom)),
+      );
+
+      // bubbles
+      if (level > 0.12) {
+        final bp = Paint()..color = Colors.white.withOpacity(0.55);
+        const xs = [0.22, 0.36, 0.5, 0.64, 0.78, 0.43];
+        for (int i = 0; i < xs.length; i++) {
+          final p = (t * (i % 2 + 1) + i * 0.17) % 1.0;
+          final y = body.bottom - 10 - p * (body.bottom - surface - 20);
+          if (y < surface + 8) continue;
+          final x = rect.left + rect.width * xs[i] + math.sin(tau * (t * 2 + i)) * 4;
+          canvas.drawCircle(Offset(x, y), 3.0 + (i % 3) * 2, bp);
+        }
+      }
+      canvas.restore();
+    }
+
+    // outline + shine
+    canvas.drawRRect(
+      body,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..color = const Color(0xFFCDBEFF),
+    );
+    final shine = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 6
+      ..color = Colors.white.withOpacity(0.85);
+    canvas.drawLine(Offset(body.left + 22, body.top + 62),
+        Offset(body.left + 22, body.top + 104), shine);
+    canvas.drawCircle(Offset(body.left + 22, body.top + 44), 3.5,
+        Paint()..color = Colors.white.withOpacity(0.85));
+
+    // face
+    final eyeY = body.top + 100;
+    final mouthY = eyeY + 36;
+    final inkFill = Paint()..color = ink;
+    final inkLine = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 4.5
+      ..color = ink;
+    final white = Paint()..color = Colors.white;
+
+    // blush
+    final blush = Paint()..color = const Color(0xFFFF8FB8).withOpacity(0.55);
+    canvas.drawCircle(Offset(cx - 64, eyeY + 24), 10, blush);
+    canvas.drawCircle(Offset(cx + 64, eyeY + 24), 10, blush);
+
+    // eyes
+    for (final sx in const [-1.0, 1.0]) {
+      final ex = cx + sx * 40;
+      if (mood == Mood.sleepy) {
+        canvas.drawArc(Rect.fromCenter(center: Offset(ex, eyeY), width: 22, height: 14),
+            0.15, math.pi - 0.3, false, inkLine);
+      } else {
+        final ry = 14 * (1 - blink) + 1.5;
+        canvas.drawOval(
+            Rect.fromCenter(center: Offset(ex, eyeY), width: 20, height: ry * 2),
+            inkFill);
+        if (ry > 7) {
+          canvas.drawCircle(Offset(ex + 3, eyeY - 5), 3.5, white);
+          canvas.drawCircle(Offset(ex - 3, eyeY + 4), 1.8, white);
+        }
+      }
+    }
+
+    // brows when worried / sad
+    if (mood == Mood.worried || mood == Mood.sad) {
+      final brow = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 4
+        ..color = ink;
+      canvas.drawLine(Offset(cx - 54, eyeY - 22), Offset(cx - 28, eyeY - 31), brow);
+      canvas.drawLine(Offset(cx + 54, eyeY - 22), Offset(cx + 28, eyeY - 31), brow);
+    }
+
+    // mouth
+    switch (mood) {
+      case Mood.happy:
+        final m = Path()
+          ..addArc(Rect.fromCenter(center: Offset(cx, mouthY - 4), width: 40, height: 30),
+              0, math.pi)
+          ..close();
+        canvas.drawPath(m, inkFill);
+        canvas.drawOval(
+            Rect.fromCenter(center: Offset(cx, mouthY + 6), width: 18, height: 9),
+            Paint()..color = const Color(0xFFFF8FB8));
+        break;
+      case Mood.ok:
+        final m = Path()
+          ..moveTo(cx - 15, mouthY - 2)
+          ..quadraticBezierTo(cx, mouthY + 12, cx + 15, mouthY - 2);
+        canvas.drawPath(m, inkLine);
+        break;
+      case Mood.worried:
+        final m = Path()
+          ..moveTo(cx - 16, mouthY + 4)
+          ..cubicTo(cx - 8, mouthY - 4, cx + 2, mouthY + 10, cx + 16, mouthY + 2);
+        canvas.drawPath(m, inkLine);
+        break;
+      case Mood.sad:
+        final m = Path()
+          ..moveTo(cx - 13, mouthY + 8)
+          ..quadraticBezierTo(cx, mouthY - 6, cx + 13, mouthY + 8);
+        canvas.drawPath(m, inkLine);
+        // sweat drop
+        final dy = ((t * 2) % 1.0) * 12;
+        final dx = cx + 66;
+        final dyy = eyeY - 30 + dy;
+        final drop = Path()
+          ..moveTo(dx, dyy - 12)
+          ..cubicTo(dx + 10, dyy, dx + 8, dyy + 10, dx, dyy + 10)
+          ..cubicTo(dx - 8, dyy + 10, dx - 10, dyy, dx, dyy - 12);
+        canvas.drawPath(drop, Paint()..color = const Color(0xFF6CC4FF));
+        break;
+      case Mood.sleepy:
+        canvas.drawOval(
+            Rect.fromCenter(center: Offset(cx, mouthY), width: 12, height: 10),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 3.5
+              ..color = ink);
+        for (int i = 0; i < 3; i++) {
+          final p = (t + i / 3) % 1.0;
+          _text(canvas, 'Z', Offset(cx + 66 + i * 12, eyeY - 38 - p * 54),
+              14.0 + i * 4, 1 - p);
+        }
+        break;
+    }
+
+    // sparkles when happy
+    if (happy) {
+      final sp = Paint()..color = const Color(0xFFFFC933);
+      final spots = [
+        Offset(body.left - 12, 96),
+        Offset(body.right + 14, 112),
+        Offset(cx + 78, 30),
+      ];
+      for (int i = 0; i < spots.length; i++) {
+        final s = 0.6 + 0.4 * math.sin(tau * (t * 2 + i / 3));
+        _star(canvas, spots[i], 11 * s + 3, sp);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant TankPainter old) => true;
+}
