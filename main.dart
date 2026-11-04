@@ -1762,7 +1762,7 @@ class _RadarPageState extends State<RadarPage> {
   Widget _routeCard() {
     final to = _routeTo!;
     return Container(
-      margin: const EdgeInsets.only(top: 10),
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
       decoration: cardDeco(color: const Color(0xFFEAF2FF), r: 20),
       child: Row(
@@ -1800,9 +1800,10 @@ class _RadarPageState extends State<RadarPage> {
     );
   }
 
-  Widget _stepsList() {
+  Widget _stepsList(ScrollController sc) {
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 10, bottom: 12),
+      controller: sc,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
       itemCount: _routeSteps.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (_, i) => Container(
@@ -1829,12 +1830,13 @@ class _RadarPageState extends State<RadarPage> {
     );
   }
 
-  Widget _stationList() {
+  Widget _stationList(ScrollController sc) {
     if (_stations.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Text(
+      return ListView(
+        controller: sc,
+        padding: const EdgeInsets.fromLTRB(24, 30, 24, 30),
+        children: [
+          Text(
             _loading
                 ? 'Pump dhoondh raha hu... 🔍'
                 : _failed
@@ -1843,73 +1845,124 @@ class _RadarPageState extends State<RadarPage> {
             textAlign: TextAlign.center,
             style: const TextStyle(color: kMuted),
           ),
-        ),
+        ],
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 12),
+      controller: sc,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
       itemCount: _stations.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (_, i) {
         final s = _stations[i];
         final q = s.queue;
-        return _Pop(
-          ms: 400 + (i < 6 ? i : 6) * 80,
-          child: GestureDetector(
-            onTap: () => _select(s),
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: cardDeco(
-                color: identical(s, _sel) ? const Color(0xFFFFE9F3) : Colors.white,
-                r: 22,
-              ),
-              child: Row(
-                children: [
-                  const Text('⛽', style: TextStyle(fontSize: 26)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(s.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${s.km.toStringAsFixed(1)} km door${s.custom ? '  •  mera add kiya' : ''}${s.reportedAt != null ? '  •  ${_ago(s.reportedAt!)}' : ''}',
-                          style: const TextStyle(fontSize: 12, color: kMuted),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+        return GestureDetector(
+          onTap: () => _select(s),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: cardDeco(
+              color: identical(s, _sel) ? const Color(0xFFFFE9F3) : Colors.white,
+              r: 22,
+            ),
+            child: Row(
+              children: [
+                const Text('⛽', style: TextStyle(fontSize: 26)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        s.rate != null ? '₹${s.rate!.toStringAsFixed(1)}/kg' : '₹ --',
-                        style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFFD9930D)),
-                      ),
+                      Text(s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w800)),
                       const SizedBox(height: 2),
                       Text(
-                        q != null ? '🚗 $q gaadi' : '🚗 --',
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: _queueColor(q)),
+                        '${s.km.toStringAsFixed(1)} km door${s.custom ? '  •  mera add kiya' : ''}${s.reportedAt != null ? '  •  ${_ago(s.reportedAt!)}' : ''}',
+                        style: const TextStyle(fontSize: 12, color: kMuted),
                       ),
                     ],
                   ),
-                ],
-              ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      s.rate != null ? '₹${s.rate!.toStringAsFixed(1)}/kg' : '₹ --',
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFFD9930D)),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      q != null ? '🚗 $q gaadi' : '🚗 --',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _queueColor(q)),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _pin(Station s) {
+    final sel = identical(s, _sel);
+    final color = s.custom
+        ? const Color(0xFF8E7CFF)
+        : s.reportedAt != null
+            ? kGreen
+            : const Color(0xFFFF8F3C);
+    return GestureDetector(
+      onTap: () => _select(s),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: sel ? color : Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color, width: 1.5),
+              boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 4)],
+            ),
+            child: Text(
+              s.rate != null
+                  ? '₹${s.rate!.toStringAsFixed(0)}'
+                  : '${s.km.toStringAsFixed(1)} km',
+              style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  color: sel ? Colors.white : kInk),
+            ),
+          ),
+          Icon(Icons.location_on, size: sel ? 36 : 30, color: color),
+        ],
+      ),
+    );
+  }
+
+  Widget _roundBtn(IconData icon, VoidCallback? onTap) {
+    return Material(
+      color: Colors.white,
+      elevation: 3,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 46,
+          height: 46,
+          child: Icon(icon, color: kInk),
+        ),
+      ),
     );
   }
 
@@ -1932,132 +1985,194 @@ class _RadarPageState extends State<RadarPage> {
       for (final s in _stations)
         fm.Marker(
           point: s.pos,
-          width: 44,
-          height: 44,
-          child: GestureDetector(
-            onTap: () => _select(s),
-            child: Icon(
-              Icons.location_on,
-              size: identical(s, _sel) ? 46 : 38,
-              color: s.custom
-                  ? const Color(0xFF8E7CFF)
-                  : s.reportedAt != null
-                      ? kGreen
-                      : const Color(0xFFFF8F3C),
-            ),
-          ),
+          width: 64,
+          height: 58,
+          alignment: Alignment.topCenter,
+          child: _pin(s),
         ),
     ];
 
+    final busy = _loading || _routing;
+
     return Scaffold(
-      body: Container(
-        decoration: kBgDeco,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: Column(
+      body: Stack(
+        children: [
+          // ---- full screen map ----
+          Positioned.fill(
+            child: fm.FlutterMap(
+              mapController: _map,
+              options: fm.MapOptions(
+                initialCenter: _me,
+                initialZoom: 13,
+                onLongPress: (tp, point) => _addCustom(point),
+                onMapReady: () {
+                  _mapReady = true;
+                  if (_located) _map.move(_me, 13.5);
+                },
+              ),
               children: [
-                Row(
-                  children: [
-                    const CngLogo(size: 40),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('CNG Pump ⛽',
-                              style: TextStyle(
-                                  fontSize: 22, fontWeight: FontWeight.w900)),
-                          Text('paas ke CNG pump • map pe long-press = pump add',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 11.5, color: kMuted)),
-                        ],
+                fm.TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.cngmeter.cng_meter',
+                ),
+                if (_routePts.length > 1)
+                  fm.PolylineLayer(
+                    polylines: [
+                      fm.Polyline(
+                        points: _routePts,
+                        strokeWidth: 5,
+                        color: const Color(0xFF4C8DFF),
+                        borderStrokeWidth: 2,
+                        borderColor: Colors.white,
                       ),
-                    ),
-                    _loading || _routing
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2.5)),
-                          )
-                        : IconButton(
-                            onPressed: () => _load(recenter: true),
-                            icon: const Icon(Icons.refresh_rounded),
-                          ),
+                    ],
+                  ),
+                fm.MarkerLayer(markers: markers),
+                const fm.RichAttributionWidget(
+                  alignment: fm.AttributionAlignment.bottomLeft,
+                  attributions: [
+                    fm.TextSourceAttribution(
+                        '© OpenStreetMap contributors • routing: OSRM'),
                   ],
-                ),
-                if (_fromCache)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text('Offline hu — pichla saved data dikha raha hu',
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.orange.shade800)),
-                  ),
-                const SizedBox(height: 12),
-                Container(
-                  height: 240,
-                  decoration: cardDeco(),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: fm.FlutterMap(
-                      mapController: _map,
-                      options: fm.MapOptions(
-                        initialCenter: _me,
-                        initialZoom: 13,
-                        onLongPress: (tp, point) => _addCustom(point),
-                        onMapReady: () {
-                          _mapReady = true;
-                          if (_located) _map.move(_me, 13.5);
-                        },
-                      ),
-                      children: [
-                        fm.TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.cngmeter.cng_meter',
-                        ),
-                        if (_routePts.length > 1)
-                          fm.PolylineLayer(
-                            polylines: [
-                              fm.Polyline(
-                                points: _routePts,
-                                strokeWidth: 5,
-                                color: const Color(0xFF4C8DFF),
-                                borderStrokeWidth: 2,
-                                borderColor: Colors.white,
-                              ),
-                            ],
-                          ),
-                        fm.MarkerLayer(markers: markers),
-                        const fm.RichAttributionWidget(
-                          attributions: [
-                            fm.TextSourceAttribution(
-                                '© OpenStreetMap contributors • routing: OSRM'),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (_routeTo != null) _routeCard(),
-                const SizedBox(height: 4),
-                Expanded(
-                  child: (_routeTo != null && _showSteps)
-                      ? _stepsList()
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: _stationList(),
-                        ),
                 ),
               ],
             ),
           ),
-        ),
+
+          // ---- floating top bar ----
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+                      decoration: cardDeco(r: 30),
+                      child: Row(
+                        children: [
+                          const CngLogo(size: 36),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('CNG Pump ⛽',
+                                    style: TextStyle(
+                                        fontSize: 18, fontWeight: FontWeight.w900)),
+                                Text('Paas ke CNG pump • route • rate',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 11.5, color: kMuted)),
+                              ],
+                            ),
+                          ),
+                          busy
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child:
+                                          CircularProgressIndicator(strokeWidth: 2.5)),
+                                )
+                              : IconButton(
+                                  onPressed: () => _load(recenter: true),
+                                  icon: const Icon(Icons.refresh_rounded),
+                                ),
+                        ],
+                      ),
+                    ),
+                    if (_fromCache)
+                      Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF1DC),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text('Offline hu — pichla saved data dikha raha hu',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.orange.shade800)),
+                      ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _roundBtn(Icons.my_location_rounded, () {
+                        if (_mapReady) _map.move(_me, 14);
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ---- draggable bottom sheet ----
+          DraggableScrollableSheet(
+            initialChildSize: 0.36,
+            minChildSize: 0.13,
+            maxChildSize: 0.88,
+            snap: true,
+            snapSizes: const [0.13, 0.36, 0.88],
+            builder: (ctx, sc) => Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF7FB),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                boxShadow: [
+                  BoxShadow(
+                      color: Color(0x33000000), blurRadius: 16, offset: Offset(0, -4)),
+                ],
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 42,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD9CFEA),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (_routeTo != null)
+                    _routeCard()
+                  else
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _stations.isEmpty
+                                  ? 'CNG pump'
+                                  : 'Sabse paas ke ${_stations.length} CNG pump',
+                              style: const TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                          const Text('long-press = add',
+                              style: TextStyle(fontSize: 11, color: kMuted)),
+                        ],
+                      ),
+                    ),
+                  Expanded(
+                    child: (_routeTo != null && _showSteps)
+                        ? _stepsList(sc)
+                        : _stationList(sc),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
