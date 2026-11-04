@@ -19,15 +19,43 @@ const String kDataUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 // Calibration / rename password
 const String kPin = '9891';
 
-// Backend (CNG SaaS) base URL for live rate + queue. Example: 'https://your-api.onrender.com'
-// Khali chhodoge to sirf OSM se pumps dikhenge (rate/queue "--").
+// CNG Radar / CNG Connect backend base URL (live rate + queue).
+// Example: 'https://your-api.onrender.com'
+// Khali = sirf OSM se pumps dikhenge (rate/queue "--").
 const String kApiBase = '';
+
+// ---------- Light theme colors ----------
+const Color kInk = Color(0xFF2B2145);
+const Color kMuted = Color(0xFF7A6F99);
+const Color kPink = Color(0xFFFF8FC4);
+const Color kGreen = Color(0xFF12B886);
+const Color kOrange = Color(0xFFFF9F43);
+const Color kRed = Color(0xFFFF5C70);
+const Color kBorder = Color(0xFFEFE6FA);
+
+BoxDecoration cardDeco({Color color = Colors.white, double r = 24}) =>
+    BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(r),
+      border: Border.all(color: kBorder),
+      boxShadow: const [
+        BoxShadow(color: Color(0x1A8E7CFF), blurRadius: 16, offset: Offset(0, 6)),
+      ],
+    );
+
+const BoxDecoration kBgDeco = BoxDecoration(
+  gradient: LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFFFFF3F9), Color(0xFFEAF2FF)],
+  ),
+);
 
 enum Mood { sleepy, happy, ok, worried, sad }
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
   runApp(const CngApp());
 }
 
@@ -41,9 +69,13 @@ class CngApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        brightness: Brightness.dark,
-        colorSchemeSeed: const Color(0xFFFF9EC7),
-        scaffoldBackgroundColor: const Color(0xFF1E1747),
+        brightness: Brightness.light,
+        colorSchemeSeed: kPink,
+        scaffoldBackgroundColor: const Color(0xFFFFF7FB),
+        textTheme: ThemeData.light().textTheme.apply(
+              bodyColor: kInk,
+              displayColor: kInk,
+            ),
       ),
       home: const Shell(),
     );
@@ -75,8 +107,9 @@ class _ShellState extends State<Shell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _i,
-        backgroundColor: const Color(0xFF16305E),
-        indicatorColor: const Color(0x44FF9EC7),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: const Color(0xFFFFD9EA),
         onDestinationSelected: (v) => setState(() {
           _i = v;
           if (v == 1) _radarOpened = true;
@@ -162,9 +195,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Color _levelColor(double p) {
-    if (p < 15) return const Color(0xFFFF7B8A);
-    if (p < 30) return const Color(0xFFFFC27A);
-    return const Color(0xFF7CF5C2);
+    if (p < 15) return kRed;
+    if (p < 30) return kOrange;
+    return kGreen;
   }
 
   String get _message {
@@ -318,7 +351,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
-          backgroundColor: const Color(0xFF2E2563),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
           title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
           content: Column(
@@ -382,7 +416,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
-          backgroundColor: const Color(0xFF2E2563),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
           title: Text(first ? 'Apne meter ka naam rakho 🏷️' : 'Naam badlo ✏️',
               style: const TextStyle(fontWeight: FontWeight.w800)),
@@ -408,8 +443,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               if (err != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Text(err!,
-                      style: const TextStyle(color: Color(0xFFFF7B8A))),
+                  child: Text(err!, style: const TextStyle(color: kRed)),
                 ),
             ],
           ),
@@ -530,17 +564,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFF2A1B5C), Color(0xFF16305E)],
-                ),
-              ),
-            ),
-          ),
+          const Positioned.fill(child: DecoratedBox(decoration: kBgDeco)),
           Positioned.fill(
             child: RepaintBoundary(
               child: AnimatedBuilder(
@@ -564,7 +588,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               style: TextStyle(
                                   fontSize: 26, fontWeight: FontWeight.w900)),
                           Text('tumhara cute gas meter',
-                              style: TextStyle(fontSize: 12, color: Colors.white60)),
+                              style: TextStyle(fontSize: 12, color: kMuted)),
                         ],
                       ),
                       const Spacer(),
@@ -580,9 +604,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             margin: const EdgeInsets.only(top: 14),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0x33FF7B8A),
+                              color: const Color(0xFFFFE9EC),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: const Color(0xFFFF7B8A)),
+                              border: Border.all(color: kRed),
                             ),
                             child: const Row(
                               children: [
@@ -619,7 +643,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     fontWeight: FontWeight.w900,
                                     color: _connected
                                         ? _levelColor(value * 100)
-                                        : Colors.white38,
+                                        : const Color(0xFFC4BBDC),
                                   ),
                                 ),
                                 AnimatedSwitcher(
@@ -634,7 +658,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     style: const TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w700,
-                                        color: Colors.white70),
+                                        color: kMuted),
                                   ),
                                 ),
                               ],
@@ -934,10 +958,10 @@ class _RadarPageState extends State<RadarPage> {
   }
 
   Color _queueColor(int? q) {
-    if (q == null) return Colors.white54;
-    if (q <= 3) return const Color(0xFF7CF5C2);
-    if (q <= 8) return const Color(0xFFFFC27A);
-    return const Color(0xFFFF7B8A);
+    if (q == null) return kMuted;
+    if (q <= 3) return kGreen;
+    if (q <= 8) return const Color(0xFFF08C00);
+    return kRed;
   }
 
   @override
@@ -952,6 +976,7 @@ class _RadarPageState extends State<RadarPage> {
             color: const Color(0xFF4C8DFF),
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white, width: 3),
+            boxShadow: const [BoxShadow(color: Color(0x554C8DFF), blurRadius: 8)],
           ),
         ),
       ),
@@ -965,7 +990,7 @@ class _RadarPageState extends State<RadarPage> {
             child: Icon(
               Icons.location_on,
               size: identical(s, _sel) ? 46 : 38,
-              color: s.live ? const Color(0xFF16C784) : const Color(0xFFFF8F3C),
+              color: s.live ? kGreen : const Color(0xFFFF8F3C),
             ),
           ),
         ),
@@ -973,13 +998,7 @@ class _RadarPageState extends State<RadarPage> {
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF2A1B5C), Color(0xFF16305E)],
-          ),
-        ),
+        decoration: kBgDeco,
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -994,7 +1013,7 @@ class _RadarPageState extends State<RadarPage> {
                             style: TextStyle(
                                 fontSize: 24, fontWeight: FontWeight.w900)),
                         Text('paas ke CNG pump, rate aur line',
-                            style: TextStyle(fontSize: 12, color: Colors.white60)),
+                            style: TextStyle(fontSize: 12, color: kMuted)),
                       ],
                     ),
                     const Spacer(),
@@ -1010,8 +1029,9 @@ class _RadarPageState extends State<RadarPage> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                SizedBox(
+                Container(
                   height: 240,
+                  decoration: cardDeco(),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(24),
                     child: fm.FlutterMap(
@@ -1048,7 +1068,7 @@ class _RadarPageState extends State<RadarPage> {
                             _loading
                                 ? 'Pump dhoondh raha hu... 🔍'
                                 : 'Paas mein CNG pump nahi mila 🥲',
-                            style: const TextStyle(color: Colors.white60),
+                            style: const TextStyle(color: kMuted),
                           ),
                         )
                       : ListView.separated(
@@ -1064,12 +1084,11 @@ class _RadarPageState extends State<RadarPage> {
                                 onTap: () => _select(s),
                                 child: Container(
                                   padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white
-                                        .withOpacity(identical(s, _sel) ? 0.16 : 0.08),
-                                    borderRadius: BorderRadius.circular(22),
-                                    border: Border.all(
-                                        color: Colors.white.withOpacity(0.12)),
+                                  decoration: cardDeco(
+                                    color: identical(s, _sel)
+                                        ? const Color(0xFFFFE9F3)
+                                        : Colors.white,
+                                    r: 22,
                                   ),
                                   child: Row(
                                     children: [
@@ -1089,7 +1108,7 @@ class _RadarPageState extends State<RadarPage> {
                                             Text(
                                               '${s.km.toStringAsFixed(1)} km door${s.live ? '  •  🟢 LIVE' : ''}',
                                               style: const TextStyle(
-                                                  fontSize: 12, color: Colors.white60),
+                                                  fontSize: 12, color: kMuted),
                                             ),
                                           ],
                                         ),
@@ -1104,7 +1123,7 @@ class _RadarPageState extends State<RadarPage> {
                                             style: const TextStyle(
                                                 fontSize: 15,
                                                 fontWeight: FontWeight.w800,
-                                                color: Color(0xFFFFE066)),
+                                                color: Color(0xFFD9930D)),
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
@@ -1144,11 +1163,11 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = connected ? const Color(0xFF7CF5C2) : Colors.white60;
+    final c = connected ? kGreen : kMuted;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: c.withOpacity(0.15),
+        color: c.withOpacity(0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -1182,11 +1201,7 @@ class _InfoCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
-      ),
+      decoration: cardDeco(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1199,7 +1214,7 @@ class _InfoCard extends StatelessWidget {
           Text(label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Colors.white60)),
+              style: const TextStyle(fontSize: 12, color: kMuted)),
         ],
       ),
     );
@@ -1267,11 +1282,7 @@ class _SoftButton extends StatelessWidget {
       child: Container(
         height: 48,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withOpacity(0.18)),
-        ),
+        decoration: cardDeco(r: 24),
         child: Text(label,
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
       ),
@@ -1291,18 +1302,20 @@ class StarsPainter extends CustomPainter {
     final r = math.Random(7);
     return List.generate(
       28,
-      (_) => [r.nextDouble(), r.nextDouble(), 1 + r.nextDouble() * 2.2, r.nextDouble() * 6.28],
+      (_) => [r.nextDouble(), r.nextDouble(), 1.5 + r.nextDouble() * 2.5, r.nextDouble() * 6.28],
     );
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final s in _stars) {
-      final op = 0.15 + 0.6 * (0.5 + 0.5 * math.sin(t * 2 * math.pi + s[3]));
+    for (int i = 0; i < _stars.length; i++) {
+      final s = _stars[i];
+      final op = 0.08 + 0.32 * (0.5 + 0.5 * math.sin(t * 2 * math.pi + s[3]));
+      final base = i.isEven ? const Color(0xFFFF8FC4) : const Color(0xFFA48CFF);
       canvas.drawCircle(
         Offset(s[0] * size.width, s[1] * size.height),
         s[2],
-        Paint()..color = Colors.white.withOpacity(op),
+        Paint()..color = base.withOpacity(op),
       );
     }
   }
@@ -1361,7 +1374,7 @@ class TankPainter extends CustomPainter {
       text: TextSpan(
         text: s,
         style: TextStyle(
-            color: Colors.white.withOpacity(op),
+            color: const Color(0xFF9B8CFF).withOpacity(op),
             fontSize: fs,
             fontWeight: FontWeight.w900),
       ),
@@ -1379,6 +1392,11 @@ class TankPainter extends CustomPainter {
       const Radius.circular(84),
     );
     final pink = Paint()..color = const Color(0xFFFFA8C8);
+
+    // ground shadow
+    canvas.drawOval(
+        Rect.fromCenter(center: Offset(cx, body.bottom + 16), width: 170, height: 12),
+        Paint()..color = const Color(0x225B4B8A));
 
     // feet
     canvas.drawOval(
@@ -1399,7 +1417,7 @@ class TankPainter extends CustomPainter {
       RRect.fromRectAndRadius(
           Rect.fromCenter(center: Offset(cx, 32), width: 36, height: 6),
           const Radius.circular(3)),
-      Paint()..color = Colors.white.withOpacity(0.6),
+      Paint()..color = Colors.white.withOpacity(0.7),
     );
 
     // hands (behind body)
@@ -1419,7 +1437,7 @@ class TankPainter extends CustomPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFFFFFFF), Color(0xFFE6E0FF)],
+          colors: [Color(0xFFFFFFFF), Color(0xFFEDE7FF)],
         ).createShader(body.outerRect),
     );
 
@@ -1446,7 +1464,7 @@ class TankPainter extends CustomPainter {
 
       // bubbles
       if (level > 0.12) {
-        final bp = Paint()..color = Colors.white.withOpacity(0.5);
+        final bp = Paint()..color = Colors.white.withOpacity(0.55);
         const xs = [0.22, 0.36, 0.5, 0.64, 0.78, 0.43];
         for (int i = 0; i < xs.length; i++) {
           final p = (t * (i % 2 + 1) + i * 0.17) % 1.0;
@@ -1465,17 +1483,17 @@ class TankPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 5
-        ..color = Colors.white.withOpacity(0.7),
+        ..color = const Color(0xFFCDBEFF),
     );
     final shine = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 6
-      ..color = Colors.white.withOpacity(0.55);
+      ..color = Colors.white.withOpacity(0.85);
     canvas.drawLine(Offset(body.left + 22, body.top + 62),
         Offset(body.left + 22, body.top + 104), shine);
     canvas.drawCircle(Offset(body.left + 22, body.top + 44), 3.5,
-        Paint()..color = Colors.white.withOpacity(0.55));
+        Paint()..color = Colors.white.withOpacity(0.85));
 
     // face
     final eyeY = body.top + 100;
@@ -1559,7 +1577,7 @@ class TankPainter extends CustomPainter {
           ..moveTo(dx, dyy - 12)
           ..cubicTo(dx + 10, dyy, dx + 8, dyy + 10, dx, dyy + 10)
           ..cubicTo(dx - 8, dyy + 10, dx - 10, dyy, dx, dyy - 12);
-        canvas.drawPath(drop, Paint()..color = const Color(0xFF8FD3FF));
+        canvas.drawPath(drop, Paint()..color = const Color(0xFF6CC4FF));
         break;
       case Mood.sleepy:
         canvas.drawOval(
@@ -1578,7 +1596,7 @@ class TankPainter extends CustomPainter {
 
     // sparkles when happy
     if (happy) {
-      final sp = Paint()..color = const Color(0xFFFFE066);
+      final sp = Paint()..color = const Color(0xFFFFC933);
       final spots = [
         Offset(body.left - 12, 96),
         Offset(body.right + 14, 112),
